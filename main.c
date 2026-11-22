@@ -201,7 +201,13 @@ static void navigate(const char *input, int remember) {
     char url[URL_CAP]; copy_s(url,sizeof(url),input); trim_s(url); if(!*url)return;
     if(prefix(url,"http://")) { char tmp[URL_CAP]; snprintf(tmp,sizeof(tmp),"https://%s",url+7); copy_s(url,sizeof(url),tmp); }
     else if(!prefix(url,"https://")) { char tmp[URL_CAP]; snprintf(tmp,sizeof(tmp),"https://%s",url); copy_s(url,sizeof(url),tmp); }
-    if(!net_ready) { set_page("Wi-Fi unavailable","Join a Wi-Fi network in the Homebrew Menu settings, then reopen WUP Browser."); status("Not connected"); return; }
+    if(!net_ready) {
+        status("Starting network...");
+        wup_log("[WUP Browser] starting network\\n");
+        net_ready = (wup_net_init() == 0);
+        wup_log(net_ready ? "[WUP Browser] network ready\\n" : "[WUP Browser] network unavailable\\n");
+    }
+    if(!net_ready) { set_page("Wi-Fi unavailable","Join Wi-Fi in Homebrew Menu settings, then tap Go to retry."); status("Not connected"); return; }
     if(!wup_time_known()) { set_page("Clock not set","Connect to Wi-Fi in the Homebrew Menu first. The menu sets the clock, which is needed to verify HTTPS certificates."); status("HTTPS needs the system clock"); return; }
     busy=1; copy_s(current_url,sizeof(current_url),url); lv_textarea_set_text(address_bar,url);
     if(keyboard)lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
@@ -275,7 +281,7 @@ int main(void) {
     keyboard=lv_keyboard_create(scr); lv_keyboard_set_textarea(keyboard,address_bar);
     lv_obj_set_size(keyboard,LV_PCT(100),190); lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(keyboard,keyboard_event,LV_EVENT_READY,NULL); lv_obj_add_event_cb(keyboard,keyboard_event,LV_EVENT_CANCEL,NULL);
-    if(!net_ready)set_page("Wi-Fi unavailable","Join a Wi-Fi network in the Homebrew Menu settings, then reopen WUP Browser.");
+    set_page("WUP Browser","Enter a website address above and tap Go. Connect to Wi-Fi in the Homebrew Menu first.");
     while(1)wup_lvgl_run(10);
     return 0;
 }
