@@ -145,8 +145,8 @@ static void parse_html(const char *html) {
                     attr_value(tag,"href",href,sizeof(href)); link_text[0]=0; link_n=0; in_link=1;
                 } else if (prefix(low,"/a")) { if (in_link) add_link(href,link_text); in_link=0; }
                 if (block_tag(tag)) {
-                    if (prefix(low,"li") && (low[2]==0 || isspace((unsigned char)low[2]))) { append_text(page_text,TEXT_CAP,&outn,'\n'); append_text(page_text,TEXT_CAP,&outn,'•'); append_text(page_text,TEXT_CAP,&outn,' '); }
-                    else if (prefix(low,"h") && low[1]>='1' && low[1]<='6') { append_text(page_text,TEXT_CAP,&outn,'\n'); append_text(page_text,TEXT_CAP,&outn,'▸'); append_text(page_text,TEXT_CAP,&outn,' '); }
+                    if (prefix(low,"li") && (low[2]==0 || isspace((unsigned char)low[2]))) { append_text(page_text,TEXT_CAP,&outn,'\n'); append_text(page_text,TEXT_CAP,&outn,'*'); append_text(page_text,TEXT_CAP,&outn,' '); }
+                    else if (prefix(low,"h") && low[1]>='1' && low[1]<='6') { append_text(page_text,TEXT_CAP,&outn,'\n'); append_text(page_text,TEXT_CAP,&outn,'>'); append_text(page_text,TEXT_CAP,&outn,' '); }
                     else append_text(page_text,TEXT_CAP,&outn,'\n');
                 }
                 if (prefix(low,"/p") || prefix(low,"/h1") || prefix(low,"/h2") || prefix(low,"/h3") || prefix(low,"/li") || prefix(low,"/blockquote") || prefix(low,"/article")) { append_text(page_text,TEXT_CAP,&outn,'\n'); append_text(page_text,TEXT_CAP,&outn,'\n'); }
