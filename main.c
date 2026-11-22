@@ -1,4 +1,4 @@
-/* WUP Browser: a touch-first, text-oriented HTTPS browser for libwup. */
+/* WUP Browser: a touch-first, lightweight HTML browser for libwup. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,8 +11,8 @@
 WUP_APP("WUP Browser");
 
 #define URL_CAP 512
-#define BODY_CAP (96u * 1024u)
-#define TEXT_CAP 16000
+#define BODY_CAP (128u * 1024u)
+#define TEXT_CAP 24000
 #define LINK_CAP 16
 #define HISTORY_CAP 6
 
@@ -22,7 +22,10 @@ typedef struct { char *data; size_t len, cap; int too_big; } response_t;
 static lv_obj_t *address_bar, *keyboard, *title_label, *body_label, *links_list, *status_label;
 static char current_url[URL_CAP], page_text[TEXT_CAP];
 static browser_link_t page_links[LINK_CAP];
-static int link_count, busy, net_ready;
+static int link_count, busy, net_ready, exit_requested;
+static lv_obj_t *form_input;
+static char form_action[URL_CAP], form_field[80], form_placeholder[100], form_submit_label[48];
+static int form_available;
 static char history[HISTORY_CAP][URL_CAP];
 static int history_count, history_pos = -1;
 
@@ -114,6 +117,7 @@ static int block_tag(const char *tag) {
 }
 static void parse_html(const char *html) {
     size_t outn=0; page_text[0]=0; link_count=0;
+    form_available=0; form_action[0]=form_field[0]=form_placeholder[0]=0; copy_s(form_submit_label,sizeof(form_submit_label),"Search");
     static char href[URL_CAP], link_text[128]; size_t link_n=0; href[0]=0; link_text[0]=0;
     int in_link=0, skip_script=0, skip_style=0;
     const char *p=html;
@@ -129,10 +133,22 @@ static void parse_html(const char *html) {
             if (prefix(low,"style") && low[5]!='/' && (low[5]==0 || isspace((unsigned char)low[5]))) skip_style=1;
             if (prefix(low,"/style")) skip_style=0;
             if (!skip_script && !skip_style) {
+                if (prefix(low,"form") && (low[4]==0 || isspace((unsigned char)low[4]))) { attr_value(tag,"action",form_action,sizeof(form_action)); form_available=1; }
+                if (prefix(low,"input") && (low[5]==0 || isspace((unsigned char)low[5]) || low[5]=='/')) {
+                    char typ[32], nm[80], val[100], ph[100];
+                    attr_value(tag,"type",typ,sizeof(typ)); attr_value(tag,"name",nm,sizeof(nm)); attr_value(tag,"value",val,sizeof(val)); attr_value(tag,"placeholder",ph,sizeof(ph));
+                    if (!strcasecmp(typ,"text") || !strcasecmp(typ,"search") || !*typ) { if (*nm && !*form_field) copy_s(form_field,sizeof(form_field),nm); if (*ph && !*form_placeholder) copy_s(form_placeholder,sizeof(form_placeholder),ph); }
+                    else if (!strcasecmp(typ,"submit") && *val) copy_s(form_submit_label,sizeof(form_submit_label),val);
+                }
                 if (prefix(low,"a ") || !strcmp(low,"a")) {
                     attr_value(tag,"href",href,sizeof(href)); link_text[0]=0; link_n=0; in_link=1;
                 } else if (prefix(low,"/a")) { if (in_link) add_link(href,link_text); in_link=0; }
-                if (block_tag(tag)) append_text(page_text,TEXT_CAP,&outn,'\n');
+                if (block_tag(tag)) {
+                    if (prefix(low,"li") && (low[2]==0 || isspace((unsigned char)low[2]))) { append_text(page_text,TEXT_CAP,&outn,'\n'); append_text(page_text,TEXT_CAP,&outn,'•'); append_text(page_text,TEXT_CAP,&outn,' '); }
+                    else if (prefix(low,"h") && low[1]>='1' && low[1]<='6') { append_text(page_text,TEXT_CAP,&outn,'\n'); append_text(page_text,TEXT_CAP,&outn,'▸'); append_text(page_text,TEXT_CAP,&outn,' '); }
+                    else append_text(page_text,TEXT_CAP,&outn,'\n');
+                }
+                if (prefix(low,"/p") || prefix(low,"/h1") || prefix(low,"/h2") || prefix(low,"/h3") || prefix(low,"/li") || prefix(low,"/blockquote") || prefix(low,"/article")) { append_text(page_text,TEXT_CAP,&outn,'\n'); append_text(page_text,TEXT_CAP,&outn,'\n'); }
                 if (prefix(low,"title") && (low[5]==0 || isspace((unsigned char)low[5]))) {
                     const char *te=strstr(end+1,"</title");
                     if (te && title_label) {
@@ -195,8 +211,31 @@ static void link_clicked(lv_event_t *e) {
     int i=(int)(intptr_t)lv_event_get_user_data(e); if(i<0||i>=link_count)return;
     static char target[URL_CAP]; if(absolute_url(current_url,page_links[i].url,target,sizeof(target)))navigate_later(target,1);
 }
+static void form_submit_clicked(lv_event_t *e) {
+    (void)e;
+    if (busy || !form_input || !form_available) return;
+    const char *value=lv_textarea_get_text(form_input);
+    if (!value || !*value) { status("Enter a search term first"); return; }
+    char action[URL_CAP], encoded[URL_CAP], target[URL_CAP];
+    if (form_action[0]) { if (!absolute_url(current_url,form_action,action,sizeof(action))) copy_s(action,sizeof(action),current_url); }
+    else copy_s(action,sizeof(action),current_url);
+    size_t n=0;
+    for (const unsigned char *p=(const unsigned char *)value; *p && n+4<sizeof(encoded); p++) {
+        if (isalnum(*p) || *p=='-' || *p=='_' || *p=='.' || *p=='~') encoded[n++]=(char)*p;
+        else if (*p==' ') encoded[n++]='+';
+        else { static const char hex[]="0123456789ABCDEF"; encoded[n++]='%'; encoded[n++]=hex[*p>>4]; encoded[n++]=hex[*p&15]; }
+    }
+    encoded[n]=0;
+    snprintf(target,sizeof(target),"%s%c%s=%s",action,strchr(action,'?')?'&':'?',form_field[0]?form_field:"q",encoded);
+    navigate_later(target,1);
+}
 static void show_links(void) {
-    lv_obj_clean(links_list);
+    lv_obj_clean(links_list); form_input=NULL;
+    if (form_available) {
+        lv_obj_t *wrap=lv_obj_create(links_list); lv_obj_set_width(wrap,LV_PCT(100)); lv_obj_set_flex_flow(wrap,LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_all(wrap,4,0);
+        form_input=lv_textarea_create(wrap); lv_obj_set_flex_grow(form_input,1); lv_obj_set_height(form_input,44); lv_textarea_set_one_line(form_input,true); lv_textarea_set_placeholder_text(form_input,form_placeholder[0]?form_placeholder:"Search the web");
+        lv_obj_t *submit=lv_button_create(wrap); lv_obj_set_height(submit,44); lv_obj_add_event_cb(submit,form_submit_clicked,LV_EVENT_CLICKED,NULL); lv_label_set_text(lv_label_create(submit),form_submit_label);
+    }
     for(int i=0;i<link_count;i++) {
         lv_obj_t *b=lv_button_create(links_list); lv_obj_set_width(b,LV_PCT(100));
         lv_obj_add_event_cb(b,link_clicked,LV_EVENT_CLICKED,(void *)(intptr_t)i);
@@ -249,6 +288,7 @@ static void reload_clicked(lv_event_t *e) { (void)e; if(*current_url)navigate_la
 static void back_clicked(lv_event_t *e) { (void)e; if(!busy && history_pos>0) { history_pos--; navigate_later(history[history_pos],0); } }
 static void home_clicked(lv_event_t *e) { (void)e; navigate_later("https://example.com",1); }
 static void address_focus(lv_event_t *e) { (void)e; if(keyboard)lv_obj_clear_flag(keyboard,LV_OBJ_FLAG_HIDDEN); }
+static void exit_clicked(lv_event_t *e) { (void)e; exit_requested=1; }
 static void keyboard_event(lv_event_t *e) {
     lv_event_code_t c=lv_event_get_code(e);
     if(c==LV_EVENT_READY) { lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN); navigate_later(lv_textarea_get_text(address_bar),1); }
@@ -272,8 +312,9 @@ int main(void) {
     address_bar=lv_textarea_create(bar); lv_obj_set_flex_grow(address_bar,1); lv_obj_set_height(address_bar,42);
     lv_textarea_set_one_line(address_bar,true); lv_textarea_set_placeholder_text(address_bar,"Enter website address");
     lv_textarea_set_text(address_bar,"https://example.com"); lv_obj_add_event_cb(address_bar,address_focus,LV_EVENT_FOCUSED,NULL);
-    lv_obj_t *go=lv_button_create(bar); lv_obj_set_size(go,56,42); lv_obj_add_event_cb(go,go_clicked,LV_EVENT_CLICKED,NULL);
+    lv_obj_t *go=lv_button_create(bar); lv_obj_set_size(go,52,42); lv_obj_add_event_cb(go,go_clicked,LV_EVENT_CLICKED,NULL);
     lv_label_set_text(lv_label_create(go),"Go");
+    lv_obj_t *exitb=lv_button_create(bar); lv_obj_set_size(exitb,58,42); lv_obj_add_event_cb(exitb,exit_clicked,LV_EVENT_CLICKED,NULL); lv_label_set_text(lv_label_create(exitb),"Exit");
     status_label=lv_label_create(scr); lv_label_set_text(status_label,"Ready");
 
     lv_obj_t *content=lv_obj_create(scr); lv_obj_set_width(content,LV_PCT(100)); lv_obj_set_flex_grow(content,1);
@@ -289,6 +330,6 @@ int main(void) {
     lv_obj_set_size(keyboard,LV_PCT(100),190); lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(keyboard,keyboard_event,LV_EVENT_READY,NULL); lv_obj_add_event_cb(keyboard,keyboard_event,LV_EVENT_CANCEL,NULL);
     set_page("WUP Browser","Enter a website address above and tap Go. Connect to Wi-Fi in the Homebrew Menu first.");
-    while(1)wup_lvgl_run(10);
+    while(!exit_requested) { wup_lvgl_run(10); if (wup_buttons() & WUP_HOME) exit_requested=1; }
     return 0;
 }
