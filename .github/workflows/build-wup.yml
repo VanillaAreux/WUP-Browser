@@ -1,0 +1,54 @@
+name: Build WUP Browser
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Wii U GamePad app
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out WUP Browser
+        uses: actions/checkout@v6
+
+      - name: Install system build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm git python3 python3-venv
+
+      - name: Install Python build dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/wup-venv"
+          "$RUNNER_TEMP/wup-venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/wup-venv/bin/python" -m pip install meson pillow
+          echo "$RUNNER_TEMP/wup-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check out libwup SDK
+        run: |
+          git clone --depth 1 https://github.com/ravensclawx/wup-homebrew.git "$RUNNER_TEMP/wup-homebrew"
+
+      - name: Build WUP Browser
+        working-directory: ${{ runner.temp }}/wup-homebrew/libwup
+        run: |
+          python3 tools/wupbuild.py "$GITHUB_WORKSPACE"
+          test -s build/apps/wup_browser.wup
+
+      - name: Upload .wup build
+        uses: actions/upload-artifact@v4
+        with:
+          name: WUP-Browser-${{ github.sha }}
+          path: ${{ runner.temp }}/wup-homebrew/libwup/build/apps/wup_browser.wup
+          if-no-files-found: error
+          compression-level: 0
