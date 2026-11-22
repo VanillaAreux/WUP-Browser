@@ -32,7 +32,7 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/wup-venv"
           "$RUNNER_TEMP/wup-venv/bin/python" -m pip install --upgrade pip
-          "$RUNNER_TEMP/wup-venv/bin/python" -m pip install meson pillow
+          "$RUNNER_TEMP/wup-venv/bin/python" -m pip install meson ninja pillow
           echo "$RUNNER_TEMP/wup-venv/bin" >> "$GITHUB_PATH"
 
       - name: Check out libwup SDK
