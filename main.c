@@ -23,13 +23,14 @@ static lv_obj_t *address_bar, *keyboard, *title_label, *body_label, *links_list,
 static char current_url[URL_CAP], page_text[TEXT_CAP];
 static browser_link_t page_links[LINK_CAP];
 static int link_count, busy, net_ready, exit_requested;
-static lv_obj_t *form_input;
+static lv_obj_t *form_input, *active_input;
 static char form_action[URL_CAP], form_field[80], form_placeholder[100], form_submit_label[48];
 static int form_available;
 static char history[HISTORY_CAP][URL_CAP];
 static int history_count, history_pos = -1;
 
 static void navigate(const char *input, int remember);
+static void address_focus(lv_event_t *e);
 static void navigate_later(const char *input, int remember);
 static void status(const char *s) { if (status_label) lv_label_set_text(status_label, s); }
 static void set_page(const char *title, const char *body) {
@@ -233,7 +234,7 @@ static void show_links(void) {
     lv_obj_clean(links_list); form_input=NULL;
     if (form_available) {
         lv_obj_t *wrap=lv_obj_create(links_list); lv_obj_set_width(wrap,LV_PCT(100)); lv_obj_set_flex_flow(wrap,LV_FLEX_FLOW_ROW); lv_obj_set_style_pad_all(wrap,4,0);
-        form_input=lv_textarea_create(wrap); lv_obj_set_flex_grow(form_input,1); lv_obj_set_height(form_input,44); lv_textarea_set_one_line(form_input,true); lv_textarea_set_placeholder_text(form_input,form_placeholder[0]?form_placeholder:"Search the web");
+        form_input=lv_textarea_create(wrap); lv_obj_set_flex_grow(form_input,1); lv_obj_set_height(form_input,44); lv_textarea_set_one_line(form_input,true); lv_textarea_set_placeholder_text(form_input,form_placeholder[0]?form_placeholder:"Search the web"); lv_obj_add_event_cb(form_input,address_focus,LV_EVENT_FOCUSED,NULL);
         lv_obj_t *submit=lv_button_create(wrap); lv_obj_set_height(submit,44); lv_obj_add_event_cb(submit,form_submit_clicked,LV_EVENT_CLICKED,NULL); lv_label_set_text(lv_label_create(submit),form_submit_label);
     }
     for(int i=0;i<link_count;i++) {
@@ -287,11 +288,11 @@ static void go_clicked(lv_event_t *e) { (void)e; navigate_later(lv_textarea_get_
 static void reload_clicked(lv_event_t *e) { (void)e; if(*current_url)navigate_later(current_url,0); }
 static void back_clicked(lv_event_t *e) { (void)e; if(!busy && history_pos>0) { history_pos--; navigate_later(history[history_pos],0); } }
 static void home_clicked(lv_event_t *e) { (void)e; navigate_later("https://example.com",1); }
-static void address_focus(lv_event_t *e) { (void)e; if(keyboard)lv_obj_clear_flag(keyboard,LV_OBJ_FLAG_HIDDEN); }
+static void address_focus(lv_event_t *e) { active_input=lv_event_get_target(e); if(keyboard) { lv_keyboard_set_textarea(keyboard,active_input); lv_obj_clear_flag(keyboard,LV_OBJ_FLAG_HIDDEN); } }
 static void exit_clicked(lv_event_t *e) { (void)e; exit_requested=1; }
 static void keyboard_event(lv_event_t *e) {
     lv_event_code_t c=lv_event_get_code(e);
-    if(c==LV_EVENT_READY) { lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN); navigate_later(lv_textarea_get_text(address_bar),1); }
+    if(c==LV_EVENT_READY) { lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN); if(active_input==form_input && form_available) form_submit_clicked(NULL); else navigate_later(lv_textarea_get_text(address_bar),1); }
     else if(c==LV_EVENT_CANCEL)lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -305,6 +306,7 @@ int main(void) {
     lv_obj_set_flex_flow(bar,LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bar,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(bar,3,0); lv_obj_set_style_pad_column(bar,5,0);
+    lv_obj_set_style_bg_color(bar,lv_color_hex(0x1B263B),0); lv_obj_set_style_bg_opa(bar,LV_OPA_COVER,0); lv_obj_set_style_radius(bar,12,0);
     lv_obj_t *back=lv_button_create(bar); lv_obj_set_size(back,44,42); lv_obj_add_event_cb(back,back_clicked,LV_EVENT_CLICKED,NULL);
     lv_label_set_text(lv_label_create(back),LV_SYMBOL_LEFT);
     lv_obj_t *reload=lv_button_create(bar); lv_obj_set_size(reload,44,42); lv_obj_add_event_cb(reload,reload_clicked,LV_EVENT_CLICKED,NULL);
@@ -318,10 +320,11 @@ int main(void) {
     status_label=lv_label_create(scr); lv_label_set_text(status_label,"Ready");
 
     lv_obj_t *content=lv_obj_create(scr); lv_obj_set_width(content,LV_PCT(100)); lv_obj_set_flex_grow(content,1);
-    lv_obj_set_flex_flow(content,LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_all(content,12,0); lv_obj_set_style_pad_row(content,8,0);
+    lv_obj_set_flex_flow(content,LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_all(content,14,0); lv_obj_set_style_pad_row(content,10,0);
+    lv_obj_set_style_bg_color(content,lv_color_hex(0xF5F7FB),0); lv_obj_set_style_bg_opa(content,LV_OPA_COVER,0); lv_obj_set_style_border_color(content,lv_color_hex(0xD9E0EA),0); lv_obj_set_style_radius(content,12,0);
     lv_obj_set_scroll_dir(content,LV_DIR_VER);
-    title_label=lv_label_create(content); lv_obj_set_width(title_label,LV_PCT(100)); lv_label_set_text(title_label,"WUP Browser");
-    body_label=lv_label_create(content); lv_obj_set_width(body_label,LV_PCT(100)); lv_label_set_long_mode(body_label,LV_LABEL_LONG_WRAP);
+    title_label=lv_label_create(content); lv_obj_set_width(title_label,LV_PCT(100)); lv_obj_set_style_text_color(title_label,lv_color_hex(0x24344D),0); lv_label_set_text(title_label,"WUP Browser");
+    body_label=lv_label_create(content); lv_obj_set_width(body_label,LV_PCT(100)); lv_obj_set_style_text_color(body_label,lv_color_hex(0x263238),0); lv_label_set_long_mode(body_label,LV_LABEL_LONG_WRAP);
     lv_label_set_text(body_label,"A lightweight browser for the GamePad. Type a website address above and tap Go.");
     links_list=lv_obj_create(content); lv_obj_set_width(links_list,LV_PCT(100)); lv_obj_set_flex_flow(links_list,LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(links_list,0,0); lv_obj_set_style_pad_row(links_list,4,0);
