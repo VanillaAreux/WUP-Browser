@@ -10,11 +10,11 @@
 
 WUP_APP("WUP Browser");
 
-#define URL_CAP 768
+#define URL_CAP 512
 #define BODY_CAP (96u * 1024u)
-#define TEXT_CAP 24000
-#define LINK_CAP 24
-#define HISTORY_CAP 12
+#define TEXT_CAP 16000
+#define LINK_CAP 16
+#define HISTORY_CAP 6
 
 typedef struct { char url[URL_CAP]; char label[128]; } browser_link_t;
 typedef struct { char *data; size_t len, cap; int too_big; } response_t;
@@ -27,6 +27,7 @@ static char history[HISTORY_CAP][URL_CAP];
 static int history_count, history_pos = -1;
 
 static void navigate(const char *input, int remember);
+static void navigate_later(const char *input, int remember);
 static void status(const char *s) { if (status_label) lv_label_set_text(status_label, s); }
 static void set_page(const char *title, const char *body) {
     if (title_label) lv_label_set_text(title_label, title);
@@ -79,7 +80,7 @@ static char decode_entity(const char *s, size_t n) {
 }
 static void add_link(const char *href, const char *label) {
     if (link_count >= LINK_CAP || !href || !*href) return;
-    char u[URL_CAP]; copy_s(u, sizeof(u), href); trim_s(u);
+    static char u[URL_CAP]; copy_s(u, sizeof(u), href); trim_s(u);
     if (!*u || u[0] == '#' || prefix(u,"javascript:") || prefix(u,"mailto:") || prefix(u,"data:")) return;
     copy_s(page_links[link_count].url, URL_CAP, u);
     copy_s(page_links[link_count].label, sizeof(page_links[link_count].label), label && *label ? label : u);
@@ -113,15 +114,15 @@ static int block_tag(const char *tag) {
 }
 static void parse_html(const char *html) {
     size_t outn=0; page_text[0]=0; link_count=0;
-    char href[URL_CAP]="", link_text[128]=""; size_t link_n=0;
+    static char href[URL_CAP], link_text[128]; size_t link_n=0; href[0]=0; link_text[0]=0;
     int in_link=0, skip_script=0, skip_style=0;
     const char *p=html;
     while (*p && outn+4<TEXT_CAP) {
         if (*p=='<') {
             const char *end=strchr(p,'>'); if (!end) break;
-            size_t n=(size_t)(end-p-1); char tag[512]; if (n>=sizeof(tag)) n=sizeof(tag)-1;
+            size_t n=(size_t)(end-p-1); static char tag[512]; if (n>=sizeof(tag)) n=sizeof(tag)-1;
             memcpy(tag,p+1,n); tag[n]=0;
-            char low[512]; copy_s(low,sizeof(low),tag);
+            static char low[512]; copy_s(low,sizeof(low),tag);
             for (size_t i=0;low[i];i++) low[i]=(char)tolower((unsigned char)low[i]);
             if (prefix(low,"script") && low[6]!='/' && (low[6]==0 || isspace((unsigned char)low[6]))) skip_script=1;
             if (prefix(low,"/script")) skip_script=0;
@@ -181,11 +182,18 @@ static void history_add(const char *url) {
     if(history_count==HISTORY_CAP) { for(int i=1;i<HISTORY_CAP;i++)copy_s(history[i-1],URL_CAP,history[i]); history_count--; history_pos--; }
     copy_s(history[history_count],URL_CAP,url); history_pos=history_count++;
 }
+static char pending_url[URL_CAP]; static int pending_remember, pending;
+static void navigate_async_cb(void *arg) { (void)arg; pending = 0; navigate(pending_url, pending_remember); }
+static void navigate_later(const char *input, int remember) {
+    if (busy || pending || !input || !*input) return;
+    copy_s(pending_url, sizeof(pending_url), input); pending_remember = remember; pending = 1;
+    lv_async_call(navigate_async_cb, NULL);
+}
 static void idle_wait(void) { wup_sleep(2); }
 static void link_clicked(lv_event_t *e) {
     if(busy)return;
     int i=(int)(intptr_t)lv_event_get_user_data(e); if(i<0||i>=link_count)return;
-    char target[URL_CAP]; if(absolute_url(current_url,page_links[i].url,target,sizeof(target)))navigate(target,1);
+    static char target[URL_CAP]; if(absolute_url(current_url,page_links[i].url,target,sizeof(target)))navigate_later(target,1);
 }
 static void show_links(void) {
     lv_obj_clean(links_list);
@@ -198,21 +206,21 @@ static void show_links(void) {
 }
 static void navigate(const char *input, int remember) {
     if(busy || !input || !*input)return;
-    char url[URL_CAP]; copy_s(url,sizeof(url),input); trim_s(url); if(!*url)return;
-    if(prefix(url,"http://")) { char tmp[URL_CAP]; snprintf(tmp,sizeof(tmp),"https://%s",url+7); copy_s(url,sizeof(url),tmp); }
-    else if(!prefix(url,"https://")) { char tmp[URL_CAP]; snprintf(tmp,sizeof(tmp),"https://%s",url); copy_s(url,sizeof(url),tmp); }
+    static char url[URL_CAP]; copy_s(url,sizeof(url),input); trim_s(url); if(!*url)return;
+    if(prefix(url,"http://")) { static char tmp[URL_CAP]; snprintf(tmp,sizeof(tmp),"https://%s",url+7); copy_s(url,sizeof(url),tmp); }
+    else if(!prefix(url,"https://")) { static char tmp[URL_CAP]; snprintf(tmp,sizeof(tmp),"https://%s",url); copy_s(url,sizeof(url),tmp); }
     if(!net_ready) {
         status("Starting network...");
-        wup_log("[WUP Browser] starting network\\n");
+        wup_log("[WUP Browser] starting network\n");
         net_ready = (wup_net_init() == 0);
-        wup_log(net_ready ? "[WUP Browser] network ready\\n" : "[WUP Browser] network unavailable\\n");
+        wup_log(net_ready ? "[WUP Browser] network ready\n" : "[WUP Browser] network unavailable\n");
     }
     if(!net_ready) { set_page("Wi-Fi unavailable","Join Wi-Fi in Homebrew Menu settings, then tap Go to retry."); status("Not connected"); return; }
     if(!wup_time_known()) { set_page("Clock not set","Connect to Wi-Fi in the Homebrew Menu first. The menu sets the clock, which is needed to verify HTTPS certificates."); status("HTTPS needs the system clock"); return; }
     busy=1; copy_s(current_url,sizeof(current_url),url); lv_textarea_set_text(address_bar,url);
     if(keyboard)lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
     if(remember)history_add(url);
-    set_page("Loading...","Connecting securely. Please wait..."); status("Loading HTTPS page...");
+    set_page("Loading...","Connecting securely. Please wait..."); status("Loading HTTPS page..."); lv_refr_now(NULL);
     response_t r={0};
     wup_https_opts opts={0};
     opts.timeout_ms=20000; opts.idle=idle_wait;
@@ -236,19 +244,18 @@ static void navigate(const char *input, int remember) {
     }
     free(r.data); busy=0;
 }
-static void go_clicked(lv_event_t *e) { (void)e; if(!busy)navigate(lv_textarea_get_text(address_bar),1); }
-static void reload_clicked(lv_event_t *e) { (void)e; if(!busy && *current_url)navigate(current_url,0); }
-static void back_clicked(lv_event_t *e) { (void)e; if(!busy && history_pos>0) { history_pos--; navigate(history[history_pos],0); } }
-static void home_clicked(lv_event_t *e) { (void)e; if(!busy) { lv_textarea_set_text(address_bar,"https://example.com"); navigate("https://example.com",1); } }
+static void go_clicked(lv_event_t *e) { (void)e; navigate_later(lv_textarea_get_text(address_bar),1); }
+static void reload_clicked(lv_event_t *e) { (void)e; if(*current_url)navigate_later(current_url,0); }
+static void back_clicked(lv_event_t *e) { (void)e; if(!busy && history_pos>0) { history_pos--; navigate_later(history[history_pos],0); } }
+static void home_clicked(lv_event_t *e) { (void)e; navigate_later("https://example.com",1); }
 static void address_focus(lv_event_t *e) { (void)e; if(keyboard)lv_obj_clear_flag(keyboard,LV_OBJ_FLAG_HIDDEN); }
 static void keyboard_event(lv_event_t *e) {
     lv_event_code_t c=lv_event_get_code(e);
-    if(c==LV_EVENT_READY) { lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN); navigate(lv_textarea_get_text(address_bar),1); }
+    if(c==LV_EVENT_READY) { lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN); navigate_later(lv_textarea_get_text(address_bar),1); }
     else if(c==LV_EVENT_CANCEL)lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
 }
 
 int main(void) {
-    net_ready=(wup_net_init()==0);
     wup_lvgl_init();
     lv_obj_t *scr=lv_screen_active();
     lv_obj_set_flex_flow(scr,LV_FLEX_FLOW_COLUMN);
@@ -267,7 +274,7 @@ int main(void) {
     lv_textarea_set_text(address_bar,"https://example.com"); lv_obj_add_event_cb(address_bar,address_focus,LV_EVENT_FOCUSED,NULL);
     lv_obj_t *go=lv_button_create(bar); lv_obj_set_size(go,56,42); lv_obj_add_event_cb(go,go_clicked,LV_EVENT_CLICKED,NULL);
     lv_label_set_text(lv_label_create(go),"Go");
-    status_label=lv_label_create(scr); lv_label_set_text(status_label,net_ready?"Ready":"Wi-Fi not connected");
+    status_label=lv_label_create(scr); lv_label_set_text(status_label,"Ready");
 
     lv_obj_t *content=lv_obj_create(scr); lv_obj_set_width(content,LV_PCT(100)); lv_obj_set_flex_grow(content,1);
     lv_obj_set_flex_flow(content,LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_all(content,12,0); lv_obj_set_style_pad_row(content,8,0);
