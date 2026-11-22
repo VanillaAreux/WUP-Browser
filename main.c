@@ -193,7 +193,7 @@ static void show_links(void) {
         lv_obj_t *b=lv_button_create(links_list); lv_obj_set_width(b,LV_PCT(100));
         lv_obj_add_event_cb(b,link_clicked,LV_EVENT_CLICKED,(void *)(intptr_t)i);
         lv_obj_t *l=lv_label_create(b); lv_label_set_text_fmt(l,LV_SYMBOL_RIGHT "  %s",page_links[i].label);
-        lv_label_set_long_mode(l,LV_LABEL_LONG_MODE_DOT); lv_obj_set_width(l,LV_PCT(100));
+        lv_label_set_long_mode(l,LV_LABEL_LONG_DOT); lv_obj_set_width(l,LV_PCT(100));
     }
 }
 static void navigate(const char *input, int remember) {
@@ -267,7 +267,7 @@ int main(void) {
     lv_obj_set_flex_flow(content,LV_FLEX_FLOW_COLUMN); lv_obj_set_style_pad_all(content,12,0); lv_obj_set_style_pad_row(content,8,0);
     lv_obj_set_scroll_dir(content,LV_DIR_VER);
     title_label=lv_label_create(content); lv_obj_set_width(title_label,LV_PCT(100)); lv_label_set_text(title_label,"WUP Browser");
-    body_label=lv_label_create(content); lv_obj_set_width(body_label,LV_PCT(100)); lv_label_set_long_mode(body_label,LV_LABEL_LONG_MODE_WRAP);
+    body_label=lv_label_create(content); lv_obj_set_width(body_label,LV_PCT(100)); lv_label_set_long_mode(body_label,LV_LABEL_LONG_WRAP);
     lv_label_set_text(body_label,"A lightweight browser for the GamePad. Type a website address above and tap Go.");
     links_list=lv_obj_create(content); lv_obj_set_width(links_list,LV_PCT(100)); lv_obj_set_flex_flow(links_list,LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(links_list,0,0); lv_obj_set_style_pad_row(links_list,4,0);
